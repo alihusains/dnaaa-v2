@@ -85,10 +85,28 @@ jobs:
           }
           EOF
 
-      - name: Create Git tag
+      - name: Create Git tag (auto-increment if exists)
         run: |
-          git tag v${DB_VERSION}
-          git push origin v${DB_VERSION}
+          VERSION="${DB_VERSION}"
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+
+          while git ls-remote --tags https://github.com/${OWNER}/${REPO}.git "v${VERSION}" | grep -q "v${VERSION}"; do
+            echo "Tag v${VERSION} already exists. Incrementing..."
+            # Increment patch number
+            PATCH=$(echo "$VERSION" | awk -F. '{print $NF}')
+            BASE=$(echo "$VERSION" | sed "s/\.[0-9]*$//")
+            PATCH=$((PATCH + 1))
+            VERSION="${BASE}.${PATCH}"
+          done
+
+          echo "Using tag: v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
+
+          # Export the final tag for later steps
+          echo "DB_TAG=${VERSION}" >> $GITHUB_ENV
+
           
       - name: Set release timestamp
         run: |
@@ -100,11 +118,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create v${DB_VERSION} \
+          gh release create v${DB_TAG} \
             database/database.sqlite \
             database/database.sqlite.zst \
             metadata.json \
-            --title "Database v${DB_VERSION}" \
+            --title "Database v${DB_TAG}" \
             --notes "Automated database release\nRelease time: ${RELEASE_TS}"
 
       - name: Update latest pointer
