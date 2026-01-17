@@ -50,9 +50,9 @@ jobs:
           echo "DB_SIZE=$(stat -c%s database/database.sqlite)" >> $GITHUB_ENV
           echo "DB_SHA256=$(cut -d ' ' -f1 database/database.sqlite.sha256)" >> $GITHUB_ENV
 
-      - name: Compress SQLite (keep original)
+      - name: Compress SQLite (overwrite if exists)
         run: |
-          zstd -19 database/database.sqlite -o database/database.sqlite.zst
+          zstd -19 -f database/database.sqlite -o database/database.sqlite.zst
 
       - name: Commit database changes (if any)
         run: |
@@ -66,6 +66,8 @@ jobs:
 
       - name: Create metadata.json
         run: |
+          GENERATED_AT=$(TZ=Asia/Dubai date '+%d-%m-%Y %H:%M:%S GMT+4')
+
           cat <<EOF > metadata.json
           {
             "version": "${DB_VERSION}",
@@ -79,7 +81,7 @@ jobs:
                 "name": "database.sqlite.zst"
               }
             },
-            "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            "generated_at": "${GENERATED_AT}"
           }
           EOF
 
@@ -99,8 +101,8 @@ jobs:
             --title "Database v${DB_VERSION}" \
             --notes "Automated database release"
 
-            - name: Update latest pointer
-          run: |
+      - name: Update latest pointer
+        run: |
           UPDATED_AT=$(TZ=Asia/Dubai date '+%d-%m-%Y %H:%M:%S GMT+4')
 
           cat <<EOF > latest.json
