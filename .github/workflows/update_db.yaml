@@ -1,84 +1,100 @@
 name: Update Database
 
 on:
-  workflow_dispatch:  # Allow manual triggering
+  workflow_dispatch:
 
 jobs:
   update_db:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
-          python-version: 3.8
+          python-version: "3.10"
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3 jq zstd
+
       - name: Run update_db.py
         env:
           DEPLOYMENT_ID_1: ${{ secrets.DEPLOYMENT_ID_1 }}
-          DEPLOYMENT_ID_2: ${{ secrets.DEPLOYMENT_ID_2 }}  # Add more if needed
+          DEPLOYMENT_ID_2: ${{ secrets.DEPLOYMENT_ID_2 }}
         run: python update_db.py
 
-      - name: Install jq
-        run: sudo apt-get install -y jq
+      - name: SQLite hygiene
+        run: |
+          sqlite3 database/database.sqlite <<'EOF'
+          PRAGMA journal_mode=DELETE;
+          PRAGMA synchronous=OFF;
+          PRAGMA temp_store=MEMORY;
+          VACUUM;
+          EOF
 
-      - name: Commit and push changes
+      - name: Generate checksums and sizes
+        run: |
+          sha256sum database/database.sqlite > database/database.sqlite.sha256
+          echo "DB_SIZE=$(stat -c%s database/database.sqlite)" >> $GITHUB_ENV
+          echo "DB_SHA256=$(cut -d ' ' -f1 database/database.sqlite.sha256)" >> $GITHUB_ENV
+
+      - name: Compress SQLite (keep original)
+        run: |
+          zstd -19 database/database.sqlite -o database/database.sqlite.zst
+
+      - name: Commit database changes (if any)
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add .
+          git add database db_version.json
           git diff --cached --quiet || (git commit -m "Update database and version" && git push)
 
-      - name: Get version
-        id: get_version
+      - name: Read DB version
         run: echo "DB_VERSION=$(jq -r .version db_version.json)" >> $GITHUB_ENV
 
-      - name: Debug DB_VERSION
-        run: echo "DB_VERSION=${{ env.DB_VERSION }}"
+      - name: Create metadata.json
+        run: |
+          cat <<EOF > metadata.json
+          {
+            "version": "${DB_VERSION}",
+            "files": {
+              "sqlite": {
+                "name": "database.sqlite",
+                "size": ${DB_SIZE},
+                "sha256": "${DB_SHA256}"
+              },
+              "sqlite_zst": {
+                "name": "database.sqlite.zst"
+              }
+            },
+            "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
 
-      - name: Check if tag exists
-        id: check_tag
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const { owner, repo } = context.repo;
-            const tags = await github.rest.repos.listTags({
-              owner,
-              repo,
-            });
-            const tagExists = tags.data.some(tag => tag.name === `v${process.env.DB_VERSION}`);
-            return tagExists;
+      - name: Create Git tag
+        run: |
+          git tag v${DB_VERSION}
+          git push origin v${DB_VERSION}
 
-      - name: Create Release
-        if: steps.check_tag.outputs.result == 'false'  # Only create release if the tag doesn't exist
-        uses: actions/create-release@v1
+      - name: Create GitHub Release with assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ env.DB_VERSION }}
-          release_name: Database version ${{ env.DB_VERSION }}
-          draft: false
-          prerelease: false
-
-      - name: Clear jsDelivr cache latest
-        if: ${{ env.DB_VERSION != '' }}
-        uses: egad13/purge-jsdelivr-cache@v1
-        with:
-          url: https://cdn.jsdelivr.net/gh/alihusains/dnaaa@latest/database/database.sqlite
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Clear jsDelivr cache main
-        if: ${{ env.DB_VERSION != '' }}
-        uses: egad13/purge-jsdelivr-cache@v1
-        with:
-          url: https://cdn.jsdelivr.net/gh/alihusains/dnaaa@main/database/database.sqlite
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create v${DB_VERSION} \
+            database/database.sqlite \
+            database/database.sqlite.zst \
+            metadata.json \
+            --title "Database v${DB_VERSION}" \
+            --notes "Automated database release"
