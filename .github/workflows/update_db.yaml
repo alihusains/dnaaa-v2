@@ -89,6 +89,12 @@ jobs:
         run: |
           git tag v${DB_VERSION}
           git push origin v${DB_VERSION}
+          
+      - name: Set release timestamp
+        run: |
+          RELEASE_TS=$(TZ=Asia/Dubai date '+%d-%m-%Y %H:%M:%S GMT+4')
+          echo "RELEASE_TS=${RELEASE_TS}" >> $GITHUB_ENV
+
 
       - name: Create GitHub Release with assets
         env:
@@ -99,7 +105,7 @@ jobs:
             database/database.sqlite.zst \
             metadata.json \
             --title "Database v${DB_VERSION}" \
-            --notes "Automated database release"
+            --notes "Automated database release\nRelease time: ${RELEASE_TS}"
 
       - name: Update latest pointer
         run: |
@@ -113,5 +119,5 @@ jobs:
           EOF
 
           git add latest.json
-          git commit -m "Update latest release pointer"
+          git commit -m "⚡️ ${DB_VERSION} at ${UPDATED_AT}"
           git push
