@@ -98,3 +98,18 @@ jobs:
             metadata.json \
             --title "Database v${DB_VERSION}" \
             --notes "Automated database release"
+
+            - name: Update latest pointer
+          run: |
+          UPDATED_AT=$(TZ=Asia/Dubai date '+%d-%m-%Y %H:%M:%S GMT+4')
+
+          cat <<EOF > latest.json
+          {
+            "latest": "${DB_VERSION}",
+            "updated_at": "${UPDATED_AT}"
+          }
+          EOF
+
+          git add latest.json
+          git commit -m "Update latest release pointer"
+          git push
