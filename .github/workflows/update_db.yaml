@@ -35,14 +35,14 @@ jobs:
           DEPLOYMENT_ID_2: ${{ secrets.DEPLOYMENT_ID_2 }}
         run: python update_db.py
 
-      - name: SQLite hygiene
-        run: |
-          sqlite3 database/database.sqlite <<'EOF'
-          PRAGMA journal_mode=DELETE;
-          PRAGMA synchronous=OFF;
-          PRAGMA temp_store=MEMORY;
-          VACUUM;
-          EOF
+      # - name: SQLite hygiene
+      #   run: |
+      #     sqlite3 database/database.sqlite <<'EOF'
+      #     PRAGMA journal_mode=DELETE;
+      #     PRAGMA synchronous=OFF;
+      #     PRAGMA temp_store=MEMORY;
+      #     VACUUM;
+      #     EOF
 
       - name: Generate checksums and sizes
         run: |
